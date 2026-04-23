@@ -3,7 +3,6 @@ package algorithm;
 import calculate.Calculate;
 import object.*;
 import utils.Data;
-import utils.ReadInstance;
 
 import java.util.*;
 
@@ -13,7 +12,7 @@ public class ALNS {
     public Solution candidateSol = new Solution(); //候选解
     public double currentTem = 1200;  //当前温度
     public double minTem = Math.pow(10, -5);  //最低温度
-    public double coolingRate = 0.85;   //降温速率
+    public double coolingRate = 0.9;   //降温速率
     public int maxIterations = 200;   //最大迭代次数
     public double[] destroyWeights = new double[]{1.0, 1.0, 1.0};   //破坏算子权重
     public double[] repairWeights = new double[]{1.0, 1.0, 1.0};    //修复算子权重
@@ -29,15 +28,37 @@ public class ALNS {
     public Para para = new Para();
     public Random random = new Random();
     public Heuristic heuristic = new Heuristic();
-    public TimeTix timeTix = new TimeTix();
+    public TimeFix timeTix = new TimeFix();
+    //消融实验
+//    public boolean useLP = false; // 消融实验开关：true 为完整算法，false 为仅 ALNS
+//    public double bestObjVal;
 
     //求解主要流程
     public void Solve(Data data) throws Exception{
+
+        // 1. 修改初始解生成部分
+//        Solution solution = heuristic.roughSol(data);
+//        double timeCost;
+//        if (useLP) {
+//            timeCost = timeTix.linerFix(solution); // 执行 LP 优化
+//        } else {
+//            double travelCost = 0.0;
+//            for (Drone drone : solution.drones) {
+//                for (int i = 0; i < drone.route.size() - 1; i++) {
+//                    travelCost += calculate.distance(drone.route.get(i), drone.route.get(i + 1)) / para.speed * para.Cost_perMinute;
+//                }
+//            }
+//            timeCost = heuristic.objVal(solution) - travelCost; // 仅计算原始时间窗惩罚 [cite: 2]
+//        }
+//        double currentObjVal = totalCost(solution, timeCost);
+
         Solution solution = heuristic.roughSol(data);
-        double currentObjVal = totalCost(solution, timeTix.linerTix(solution));
+        double currentObjVal = totalCost(solution, timeTix.linerFix(solution));
+        //double currentObjVal = totalCost(solution);
 
         bestSol = solution;
         double bestObjVal = currentObjVal;
+        //this.bestObjVal = currentObjVal;
         currentSol = solution;
 
         System.out.println("初始目标值：" + bestObjVal);
@@ -50,7 +71,6 @@ public class ALNS {
         {
             for (int i = 0; i < maxIterations; i++)
             {
-
                 //复制的任务列表！！！！！！！！
                 List<Task> copiedTasks = new ArrayList<>(tasks);
 
@@ -76,8 +96,18 @@ public class ALNS {
 
                 //启发式方法得到新解
                 translate(candidateSol, tasks, data);
-                double timeCost = timeTix.linerTix(candidateSol);
-                //double candObjVal = heuristic.objVal(candidateSol);
+
+                //增加：修改新解评估部分
+//                double candTimeCost;
+//                if (useLP) {
+//                    candTimeCost = timeTix.linerFix(candidateSol); //
+//                } else {
+//                    // 如果不用 LP，直接使用粗略解的时间计算
+//                    candTimeCost = calculateOnlyTimeViolation(candidateSol);
+//                }
+//                double candObjVal = totalCost(candidateSol, candTimeCost);
+
+                double timeCost = timeTix.linerFix(candidateSol);
 
                 //计算新解的目标函数值
                 double candObjVal = totalCost(candidateSol, timeCost);
@@ -127,6 +157,7 @@ public class ALNS {
                 if (iterationCount % updateFrequency == 0) {
                     updateWeights();
                 }
+                iterationCount++;
             }
             currentTem *= coolingRate;
             //System.out.println("最优目标值：" + bestObjVal);
@@ -158,6 +189,18 @@ public class ALNS {
 //            System.out.println(name + ": " + globalRepairCount[i]);
 //        }
     }
+
+    // 辅助方法：计算没有 LP 优化时的原始时间窗惩罚成本
+    private double calculateOnlyTimeViolation(Solution sol) {
+        double totalViolation = 0;
+        for (Drone d : sol.drones) {
+            for (Task t : d.taskList) {
+                totalViolation += heuristic.calculateSingleTimeCost(t, t.arrivalTime); // [cite: 2]
+            }
+        }
+        return totalViolation;
+    }
+
 
     //更新算子权重
     private void updateWeights() {
@@ -237,7 +280,7 @@ public class ALNS {
     public List<Task> randomDestroy(List<Task> tasks) {
         //随机选择20%的任务编号
         List<Integer> selectTask = new ArrayList<>();
-        while (selectTask.size() < tasks.size() * 0.2) {
+        while (selectTask.size() < tasks.size() * 0.1) {
             int taskId = random.nextInt(tasks.size()) + 1; // 任务编号从1到20
             if (!selectTask.contains(taskId)) {
                 selectTask.add(taskId);
@@ -272,8 +315,6 @@ public class ALNS {
 //        System.out.println();
 
         return removedTasks;
-        //输出移除后的任务列表
-
     }
 
     //时间窗违反程度破坏算子
@@ -306,7 +347,7 @@ public class ALNS {
 
         //选择违反成本前20%的任务
         List<Integer> selectTask = new ArrayList<>();
-        int num = (int) Math.ceil(tasks.size() * 0.2);
+        int num = (int) Math.ceil(tasks.size() * 0.1 );
         for (int i = 0; i < num; i++) {
             selectTask.add(timeWindowCost.get(i).taskId);
         }
@@ -339,9 +380,6 @@ public class ALNS {
 //        System.out.println();
 
         return removedTasks;
-
-        //输出移除后的任务列表
-
     }
 
     //相似度破坏算子
@@ -432,7 +470,7 @@ public class ALNS {
         similarities.sort((a, b) -> Double.compare(b[1], a[1]));
 
         // 5. 计算总共需要移除的数量 (例如 20%)
-        int totalToRemove = (int) Math.ceil(tasks.size() * 0.2);
+        int totalToRemove = (int) Math.ceil(tasks.size() * 0.1);
 
         // 已经移除了种子任务，还需要再找 totalToRemove - 1 个最相似的任务
         int extraNeeded = totalToRemove - 1;
@@ -645,14 +683,13 @@ public class ALNS {
     }
 
     //初始化
-    public void initDroneRoute(Solution solution, Data data)
-    {
-        for (Drone drone : data.drones){
-
-            solution.drones.add(drone);
-        }
-    }
-
+//    public void initDroneRoute(Solution solution, Data data)
+//    {
+//        for (Drone drone : data.drones){
+//
+//            solution.drones.add(drone);
+//        }
+//    }
     //解码
 //    public void translate(Solution canSol, List<Task> tasks, Data data)
 //    {
@@ -879,12 +916,8 @@ public class ALNS {
 
             // 步骤 D：更新全局时间依赖，强制下一个任务基于当前结束时间开始
             currentTime = task.arrivalTime;
-
-
         }
     }
-
-
 
     // 辅助方法：添加动作弧并更新无人机时间
     private void addArc(Drone drone, Task task, Locker locker, boolean action, double startTime) {
@@ -1022,12 +1055,12 @@ public class ALNS {
             }
         }
 //        System.out.println("最优目标值：" + );
-        System.out.println("Travel cost: " + travelCost);
+        System.out.println("Travel cost: " + travelCost );
         System.out.println("Total cost: " + objVal);
     }
 
     //计算目标函数值
-    public double totalCost(Solution solution, double timeCost)
+    public double totalCost(Solution solution,double timeCost)
     {
         double travelCost = 0.0;
         for (Drone drone : solution.drones) {
@@ -1038,7 +1071,9 @@ public class ALNS {
                 travelCost += (calculate.distance(locker1, locker2) / para.speed) * para.Cost_perMinute;
             }
         }
-        //return 0.6 * travelCost + 0.4 * timeCost;
+        //return 0.2 * travelCost + 0.8 * timeCost;
+        //return 0.5 * travelCost + 0.5 * timeCost;
+        //return 0.8 * travelCost + 0.2 * timeCost;
         return  travelCost + timeCost;
     }
 
